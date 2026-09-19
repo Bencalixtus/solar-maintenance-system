@@ -8,114 +8,28 @@ use App\Models\Inspection;
 use App\Models\MaintenanceSchedule;
 use App\Models\ReplacementForecast;
 use App\Models\Measurement;
-use Illuminate\Support\Carbon;
+use Illuminate\Http\Request;
+use Carbon\Carbon;
 
 class DashboardController extends Controller
 {
     /**
-     * Display the main dashboard.
+     * Main dashboard
      */
     public function index()
     {
-        $today = Carbon::today();
+        $installationCount = Installation::count();
+        $componentCount = Component::count();
+        $inspectionCount = Inspection::count();
 
-        /*
-        |--------------------------------------------------------------------------
-        | Basic Statistics
-        |--------------------------------------------------------------------------
-        */
-
-        $totalInstallations = Installation::count();
-
-        $totalComponents = Component::count();
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | Pending / Overdue Inspections
-        |--------------------------------------------------------------------------
-        */
-
-        $pendingInspections = Inspection::whereDate(
-            'next_inspection_date',
-            '<=',
-            $today
-        )->count();
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | Maintenance Due
-        |--------------------------------------------------------------------------
-        */
-
-        $maintenanceDue = MaintenanceSchedule::whereDate(
-            'next_due_date',
-            '<=',
-            $today
-        )->count();
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | Component Condition
-        |--------------------------------------------------------------------------
-        */
-
-        $conditionData = [
-            'Excellent' => Component::where(
-                'current_condition',
-                'Excellent'
-            )->count(),
-
-            'Good' => Component::where(
-                'current_condition',
-                'Good'
-            )->count(),
-
-            'Fair' => Component::where(
-                'current_condition',
-                'Fair'
-            )->count(),
-
-            'Poor' => Component::where(
-                'current_condition',
-                'Poor'
-            )->count(),
-
-            'Critical' => Component::where(
-                'current_condition',
-                'Critical'
-            )->count(),
-        ];
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | Maintenance Statistics
-        |--------------------------------------------------------------------------
-        */
-
-        $totalMaintenance = MaintenanceSchedule::count();
-
-        $scheduledMaintenance = MaintenanceSchedule::whereDate(
-            'next_due_date',
-            '>',
-            $today
-        )->count();
-
-        $dueMaintenance = MaintenanceSchedule::whereDate(
-            'next_due_date',
-            '<=',
-            $today
-        )->count();
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | Recent Inspections
-        |--------------------------------------------------------------------------
-        */
+        $upcomingMaintenance = MaintenanceSchedule::whereDate(
+            'scheduled_date',
+            '>=',
+            Carbon::today()
+        )
+            ->orderBy('scheduled_date')
+            ->take(5)
+            ->get();
 
         $recentInspections = Inspection::with([
             'installation',
@@ -125,67 +39,40 @@ class DashboardController extends Controller
             ->take(5)
             ->get();
 
+        $activeComponents = Component::where('status', 'Active')->count();
 
-        /*
-        |--------------------------------------------------------------------------
-        | Replacement Risk
-        |--------------------------------------------------------------------------
-        */
+        $replacementForecasts = ReplacementForecast::count();
 
-        $riskData = [
-            'Low' => ReplacementForecast::where(
-                'risk_level',
-                'Low'
-            )->count(),
+        $highRiskForecasts = ReplacementForecast::where(
+            'risk_level',
+            'High'
+        )->count();
 
-            'Medium' => ReplacementForecast::where(
-                'risk_level',
-                'Medium'
-            )->count(),
-
-            'High' => ReplacementForecast::where(
-                'risk_level',
-                'High'
-            )->count(),
-        ];
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | Send Data To Dashboard
-        |--------------------------------------------------------------------------
-        */
-
-        return view('dashboard', compact(
-            'totalInstallations',
-            'totalComponents',
-            'pendingInspections',
-            'maintenanceDue',
-            'conditionData',
-            'totalMaintenance',
-            'scheduledMaintenance',
-            'dueMaintenance',
-            'recentInspections',
-            'riskData'
-        ));
+        return view('dashboard', [
+            'installationCount' => $installationCount,
+            'componentCount' => $componentCount,
+            'inspectionCount' => $inspectionCount,
+            'activeComponents' => $activeComponents,
+            'upcomingMaintenance' => $upcomingMaintenance,
+            'recentInspections' => $recentInspections,
+            'replacementForecasts' => $replacementForecasts,
+            'highRiskForecasts' => $highRiskForecasts,
+        ]);
     }
 
 
     /**
-     * Display degradation analysis.
-     *
-     * This method provides the degradation analysis page using the
-     * component measurements stored in the database.
+     * Degradation analysis dashboard
      */
-    public function degradation()
+    public function degradation(Request $request)
     {
         /*
         |--------------------------------------------------------------------------
         | Performance Parameters
         |--------------------------------------------------------------------------
         |
-        | These are the measurement parameters that can be used to
-        | calculate component degradation.
+        | These parameters are suitable for calculating performance loss when
+        | a meaningful reference value is available.
         |
         */
 
@@ -209,101 +96,143 @@ class DashboardController extends Controller
         $components = Component::with([
             'componentType',
             'installation',
-            'measurements'
-        ])->get();
+            'measurements' => function ($query) {
+                $query->orderBy('measurement_date');
+            },
+        ])
+            ->orderBy('name')
+            ->get();
 
 
         /*
         |--------------------------------------------------------------------------
-        | Build Component Degradation Summary
+        | Summary Counters
         |--------------------------------------------------------------------------
         */
 
-        $componentSummaries = collect();
+        $normalCount = 0;
+        $monitorCount = 0;
+        $attentionCount = 0;
+        $criticalCount = 0;
 
+
+        /*
+        |--------------------------------------------------------------------------
+        | Component Summary
+        |--------------------------------------------------------------------------
+        */
+
+        $componentSummaries = [];
+
+        /*
+        |--------------------------------------------------------------------------
+        | Component Comparison Chart
+        |--------------------------------------------------------------------------
+        */
+
+        $comparisonData = [];
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Analyse Every Component
+        |--------------------------------------------------------------------------
+        */
 
         foreach ($components as $component) {
 
-            $performanceMeasurements = $component->measurements
-                ->filter(function ($measurement) use ($performanceParameters) {
-                    return in_array(
-                        trim($measurement->parameter),
-                        $performanceParameters,
-                        true
-                    )
-                    && $measurement->reference_value !== null
-                    && (float) $measurement->reference_value > 0;
-                });
-
+            $performanceLosses = [];
 
             /*
-            |----------------------------------------------------------------------
-            | Group Measurements By Parameter
-            |----------------------------------------------------------------------
-            */
-
-            $latestByParameter = $performanceMeasurements
-                ->groupBy(function ($measurement) {
-                    return trim($measurement->parameter);
-                })
-                ->map(function ($measurements) {
-                    return $measurements
-                        ->sortByDesc('measurement_date')
-                        ->first();
-                });
+             * Group measurements by parameter.
+             */
+            $measurementsByParameter = $component->measurements
+                ->groupBy('parameter');
 
 
-            $degradationValues = [];
+            foreach ($measurementsByParameter as $parameter => $measurements) {
 
-
-            foreach ($latestByParameter as $measurement) {
-
-                $reference = (float) $measurement->reference_value;
-                $current = (float) $measurement->value;
-
-
-                if ($reference <= 0) {
+                /*
+                 * Only performance parameters are used for degradation
+                 * calculations.
+                 */
+                if (!in_array($parameter, $performanceParameters)) {
                     continue;
                 }
 
+                $measurements = $measurements
+                    ->sortBy('measurement_date')
+                    ->values();
+
+                $latest = $measurements->last();
+
+                if (!$latest) {
+                    continue;
+                }
+
+                /*
+                 * Use the latest meaningful reference value.
+                 */
+                $reference = null;
+
+                foreach ($measurements->reverse() as $measurement) {
+
+                    if (
+                        $measurement->reference_value !== null &&
+                        is_numeric($measurement->reference_value) &&
+                        (float) $measurement->reference_value > 0
+                    ) {
+                        $reference = (float) $measurement->reference_value;
+                        break;
+                    }
+                }
+
+                /*
+                 * If there is no reference value, degradation cannot
+                 * be calculated reliably.
+                 */
+                if (
+                    $reference === null ||
+                    $latest->value === null ||
+                    !is_numeric($latest->value)
+                ) {
+                    continue;
+                }
+
+                $currentValue = (float) $latest->value;
 
                 $degradation = (
-                    ($reference - $current)
+                    ($reference - $currentValue)
                     / $reference
                 ) * 100;
 
-
                 /*
-                |------------------------------------------------------------------
-                | Prevent negative degradation
-                |------------------------------------------------------------------
-                */
-
+                 * Prevent negative degradation from being displayed as
+                 * performance loss.
+                 */
                 $degradation = max(0, $degradation);
 
-
-                $degradationValues[] = $degradation;
+                $performanceLosses[] = $degradation;
             }
 
 
             /*
             |--------------------------------------------------------------------------
-            | Average Degradation
+            | Component Average Degradation
             |--------------------------------------------------------------------------
             */
 
-            $averageDegradation = count($degradationValues) > 0
-                ? round(
-                    array_sum($degradationValues)
-                    / count($degradationValues),
-                    2
-                )
-                : null;
+            $averageDegradation = null;
+
+            if (count($performanceLosses) > 0) {
+                $averageDegradation = array_sum($performanceLosses)
+                    / count($performanceLosses);
+            }
 
 
             /*
             |--------------------------------------------------------------------------
-            | Determine Status
+            | Component Status
             |--------------------------------------------------------------------------
             */
 
@@ -311,15 +240,15 @@ class DashboardController extends Controller
 
                 $status = 'No Data';
 
-            } elseif ($averageDegradation < 5) {
+            } elseif ($averageDegradation <= 5) {
 
                 $status = 'Normal';
 
-            } elseif ($averageDegradation < 10) {
+            } elseif ($averageDegradation <= 15) {
 
                 $status = 'Monitor';
 
-            } elseif ($averageDegradation < 20) {
+            } elseif ($averageDegradation <= 30) {
 
                 $status = 'Attention';
 
@@ -331,101 +260,58 @@ class DashboardController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | Determine Trend
+            | Count Statuses
             |--------------------------------------------------------------------------
-            |
-            | Compare older and newer performance measurements where
-            | possible.
-            |
             */
 
-            $trend = 'Stable';
+            switch ($status) {
 
+                case 'Normal':
+                    $normalCount++;
+                    break;
 
-            $historicalDegradation = [];
+                case 'Monitor':
+                    $monitorCount++;
+                    break;
 
+                case 'Attention':
+                    $attentionCount++;
+                    break;
 
-            foreach (
-                $component->measurements
-                    ->filter(function ($measurement) use ($performanceParameters) {
-                        return in_array(
-                            trim($measurement->parameter),
-                            $performanceParameters,
-                            true
-                        )
-                        && $measurement->reference_value !== null
-                        && (float) $measurement->reference_value > 0;
-                    })
-                    ->groupBy(function ($measurement) {
-                        return trim($measurement->parameter);
-                    })
-                as $measurements
-            ) {
-
-                foreach ($measurements->sortBy('measurement_date') as $measurement) {
-
-                    $reference = (float) $measurement->reference_value;
-                    $current = (float) $measurement->value;
-
-                    if ($reference <= 0) {
-                        continue;
-                    }
-
-                    $degradation = max(
-                        0,
-                        (($reference - $current) / $reference) * 100
-                    );
-
-                    $historicalDegradation[] = [
-                        'date' => $measurement->measurement_date,
-                        'degradation' => $degradation,
-                    ];
-                }
-            }
-
-
-            if (count($historicalDegradation) >= 2) {
-
-                usort(
-                    $historicalDegradation,
-                    function ($a, $b) {
-                        return $a['date'] <=> $b['date'];
-                    }
-                );
-
-
-                $first = $historicalDegradation[0]['degradation'];
-                $last = end($historicalDegradation)['degradation'];
-
-
-                if ($last > $first + 1) {
-
-                    $trend = 'Declining';
-
-                } elseif ($last < $first - 1) {
-
-                    $trend = 'Improving';
-
-                } else {
-
-                    $trend = 'Stable';
-                }
+                case 'Critical':
+                    $criticalCount++;
+                    break;
             }
 
 
             /*
             |--------------------------------------------------------------------------
-            | Store Summary
+            | Component Summary
             |--------------------------------------------------------------------------
             */
 
-            $componentSummaries->push([
+            $componentSummaries[] = [
                 'component' => $component,
-                'average_degradation' => $averageDegradation,
+                'degradation' => $averageDegradation,
                 'status' => $status,
-                'trend' => $trend,
-                'parameters_count' => count($degradationValues),
-            ]);
+            ];
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | Comparison Chart
+            |--------------------------------------------------------------------------
+            */
+
+            if ($averageDegradation !== null) {
+
+                $comparisonData[] = [
+                    'id' => $component->id,
+                    'name' => $component->name,
+                    'degradation' => round($averageDegradation, 2),
+                    'status' => $status,
+                ];
+            }
         }
 
 
@@ -433,236 +319,363 @@ class DashboardController extends Controller
         |--------------------------------------------------------------------------
         | Selected Component
         |--------------------------------------------------------------------------
-        |
-        | Allow the page to display a specific component using:
-        |
-        | /degradation?component=1
-        |
         */
 
         $selectedComponent = null;
+        $parameterAnalysis = [];
 
-        $selectedComponentId = request()->query('component');
 
-
-        if ($selectedComponentId) {
+        if ($request->filled('component_id')) {
 
             $selectedComponent = $components->firstWhere(
                 'id',
-                (int) $selectedComponentId
+                (int) $request->component_id
             );
         }
 
 
         /*
         |--------------------------------------------------------------------------
-        | Default Selected Component
+        | Detailed Selected Component Analysis
         |--------------------------------------------------------------------------
         */
-
-        if (!$selectedComponent) {
-
-            $selectedComponent = $components->first();
-        }
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | Selected Component Analysis
-        |--------------------------------------------------------------------------
-        */
-
-        $selectedAnalysis = collect();
-
 
         if ($selectedComponent) {
 
-            foreach ($performanceParameters as $parameter) {
+            $measurementsByParameter = $selectedComponent->measurements
+                ->groupBy('parameter');
 
-                $measurements = $selectedComponent->measurements
-                    ->filter(function ($measurement) use ($parameter) {
 
-                        return trim($measurement->parameter) === $parameter;
-                    })
-                    ->sortByDesc('measurement_date')
+            /*
+             * Include every parameter found in the component's
+             * measurements.
+             */
+            foreach ($measurementsByParameter as $parameter => $measurements) {
+
+                $measurements = $measurements
+                    ->sortBy('measurement_date')
                     ->values();
 
-
-                $latest = $measurements->first();
-
-
-                if (!$latest) {
-
-                    $selectedAnalysis->push([
-                        'parameter' => $parameter,
-                        'latest' => null,
-                        'degradation' => null,
-                        'performance' => null,
-                        'status' => 'No Data',
-                        'trend' => 'No Data',
-                        'chart' => [],
-                    ]);
-
-                    continue;
-                }
+                $latest = $measurements->last();
 
 
                 /*
-                |------------------------------------------------------------------
-                | No reference value
-                |------------------------------------------------------------------
+                |--------------------------------------------------------------------------
+                | Is Performance Parameter?
+                |--------------------------------------------------------------------------
                 */
 
-                if (
-                    $latest->reference_value === null
-                    || (float) $latest->reference_value <= 0
-                ) {
-
-                    $selectedAnalysis->push([
-                        'parameter' => $parameter,
-                        'latest' => $latest,
-                        'degradation' => null,
-                        'performance' => null,
-                        'status' => 'No Reference',
-                        'trend' => 'Monitoring Only',
-                        'chart' => [],
-                    ]);
-
-                    continue;
-                }
-
-
-                $reference = (float) $latest->reference_value;
-                $current = (float) $latest->value;
-
-
-                $degradation = max(
-                    0,
-                    (($reference - $current) / $reference) * 100
+                $isPerformanceParameter = in_array(
+                    $parameter,
+                    $performanceParameters
                 );
 
 
-                $performance = (
-                    $current / $reference
-                ) * 100;
-
-
                 /*
-                |------------------------------------------------------------------
-                | Status
-                |------------------------------------------------------------------
+                |--------------------------------------------------------------------------
+                | Find Reference Value
+                |--------------------------------------------------------------------------
                 */
 
-                if ($degradation < 5) {
+                $reference = null;
 
-                    $parameterStatus = 'Normal';
+                foreach ($measurements->reverse() as $measurement) {
 
-                } elseif ($degradation < 10) {
-
-                    $parameterStatus = 'Monitor';
-
-                } elseif ($degradation < 20) {
-
-                    $parameterStatus = 'Attention';
-
-                } else {
-
-                    $parameterStatus = 'Critical';
-                }
-
-
-                /*
-                |------------------------------------------------------------------
-                | Historical Chart Data
-                |------------------------------------------------------------------
-                */
-
-                $chart = $measurements
-                    ->filter(function ($measurement) {
-                        return $measurement->reference_value !== null
-                            && (float) $measurement->reference_value > 0;
-                    })
-                    ->sortBy('measurement_date')
-                    ->map(function ($measurement) {
-
+                    if (
+                        $measurement->reference_value !== null &&
+                        is_numeric($measurement->reference_value) &&
+                        (float) $measurement->reference_value > 0
+                    ) {
                         $reference = (float) $measurement->reference_value;
-                        $current = (float) $measurement->value;
-
-                        $degradation = max(
-                            0,
-                            (($reference - $current) / $reference) * 100
-                        );
-
-                        return [
-                            'date' => $measurement->measurement_date
-                                ? $measurement->measurement_date->format('Y-m-d')
-                                : null,
-
-                            'value' => $current,
-
-                            'reference' => $reference,
-
-                            'degradation' => round(
-                                $degradation,
-                                2
-                            ),
-                        ];
-                    })
-                    ->values()
-                    ->toArray();
-
-
-                /*
-                |------------------------------------------------------------------
-                | Parameter Trend
-                |------------------------------------------------------------------
-                */
-
-                $parameterTrend = 'Stable';
-
-
-                if (count($chart) >= 2) {
-
-                    $first = $chart[0]['degradation'];
-                    $last = end($chart)['degradation'];
-
-
-                    if ($last > $first + 1) {
-
-                        $parameterTrend = 'Declining';
-
-                    } elseif ($last < $first - 1) {
-
-                        $parameterTrend = 'Improving';
+                        break;
                     }
                 }
 
 
-                $selectedAnalysis->push([
+                /*
+                |--------------------------------------------------------------------------
+                | Default Analysis Values
+                |--------------------------------------------------------------------------
+                */
+
+                $degradation = null;
+                $performance = null;
+                $trend = 'Insufficient Data';
+                $status = 'Monitoring Only';
+
+                $chartData = [];
+
+
+                /*
+                |--------------------------------------------------------------------------
+                | Performance Parameter Analysis
+                |--------------------------------------------------------------------------
+                */
+
+                if ($isPerformanceParameter) {
+
+                    if (
+                        $latest &&
+                        $reference !== null &&
+                        $latest->value !== null &&
+                        is_numeric($latest->value)
+                    ) {
+
+                        $currentValue = (float) $latest->value;
+
+                        $degradation = (
+                            ($reference - $currentValue)
+                            / $reference
+                        ) * 100;
+
+                        $degradation = max(0, $degradation);
+
+                        $performance = max(
+                            0,
+                            min(100, 100 - $degradation)
+                        );
+
+
+                        /*
+                        |--------------------------------------------------------------------------
+                        | Status
+                        |--------------------------------------------------------------------------
+                        */
+
+                        if ($degradation <= 5) {
+
+                            $status = 'Normal';
+
+                        } elseif ($degradation <= 15) {
+
+                            $status = 'Monitor';
+
+                        } elseif ($degradation <= 30) {
+
+                            $status = 'Attention';
+
+                        } else {
+
+                            $status = 'Critical';
+                        }
+
+
+                        /*
+                        |--------------------------------------------------------------------------
+                        | Trend
+                        |--------------------------------------------------------------------------
+                        |
+                        | Compare the first and latest degradation values.
+                        |
+                        */
+
+                        $degradationHistory = [];
+
+                        foreach ($measurements as $measurement) {
+
+                            if (
+                                $measurement->value === null ||
+                                !is_numeric($measurement->value)
+                            ) {
+                                continue;
+                            }
+
+                            $measurementReference =
+                                $measurement->reference_value !== null &&
+                                is_numeric($measurement->reference_value) &&
+                                (float) $measurement->reference_value > 0
+                                    ? (float) $measurement->reference_value
+                                    : $reference;
+
+                            if ($measurementReference <= 0) {
+                                continue;
+                            }
+
+                            $measurementDegradation = (
+                                ($measurementReference - (float) $measurement->value)
+                                / $measurementReference
+                            ) * 100;
+
+                            $measurementDegradation = max(
+                                0,
+                                $measurementDegradation
+                            );
+
+                            $degradationHistory[] = [
+                                'date' => $measurement->measurement_date
+                                    ? $measurement->measurement_date->format('d M Y')
+                                    : 'N/A',
+                                'degradation' => $measurementDegradation,
+                            ];
+                        }
+
+
+                        if (count($degradationHistory) >= 2) {
+
+                            $firstDegradation =
+                                $degradationHistory[0]['degradation'];
+
+                            $lastDegradation =
+                                $degradationHistory[
+                                    count($degradationHistory) - 1
+                                ]['degradation'];
+
+                            $difference =
+                                $lastDegradation - $firstDegradation;
+
+
+                            if ($difference > 1) {
+
+                                $trend = 'Declining';
+
+                            } elseif ($difference < -1) {
+
+                                $trend = 'Improving';
+
+                            } else {
+
+                                $trend = 'Stable';
+                            }
+                        }
+
+
+                        /*
+                        |--------------------------------------------------------------------------
+                        | Chart Data
+                        |--------------------------------------------------------------------------
+                        */
+
+                        foreach ($measurements as $measurement) {
+
+                            if (
+                                $measurement->value === null ||
+                                !is_numeric($measurement->value)
+                            ) {
+                                continue;
+                            }
+
+                            $measurementReference =
+                                $measurement->reference_value !== null &&
+                                is_numeric($measurement->reference_value) &&
+                                (float) $measurement->reference_value > 0
+                                    ? (float) $measurement->reference_value
+                                    : $reference;
+
+                            $chartData[] = [
+                                'date' => $measurement->measurement_date
+                                    ? $measurement->measurement_date->format('d M Y')
+                                    : 'N/A',
+                                'value' => (float) $measurement->value,
+                                'reference' => $measurementReference,
+                            ];
+                        }
+                    } else {
+
+                        $status = 'No Reference';
+                    }
+                }
+
+
+                /*
+                |--------------------------------------------------------------------------
+                | Interpretation
+                |--------------------------------------------------------------------------
+                */
+
+                if (!$isPerformanceParameter) {
+
+                    $interpretation =
+                        'This parameter is monitored for operating condition. '
+                        . 'Its value is not used directly to calculate degradation '
+                        . 'because it can vary with operating and environmental conditions.';
+
+                } elseif ($status === 'No Reference') {
+
+                    $interpretation =
+                        'A meaningful reference value is not available, '
+                        . 'so performance loss cannot be calculated reliably.';
+
+                } elseif ($status === 'Normal') {
+
+                    $interpretation =
+                        'Performance loss is within the normal range based on '
+                        . 'the project decision-support thresholds.';
+
+                } elseif ($status === 'Monitor') {
+
+                    $interpretation =
+                        'The component shows a moderate performance loss and '
+                        . 'should be monitored during subsequent inspections.';
+
+                } elseif ($status === 'Attention') {
+
+                    $interpretation =
+                        'The measured performance loss is significant and '
+                        . 'should receive closer inspection and maintenance attention.';
+
+                } elseif ($status === 'Critical') {
+
+                    $interpretation =
+                        'The measured performance loss is high and should be '
+                        . 'investigated promptly as part of maintenance or replacement planning.';
+
+                } else {
+
+                    $interpretation =
+                        'Additional measurements are required for a reliable assessment.';
+                }
+
+
+                /*
+                |--------------------------------------------------------------------------
+                | Store Parameter Analysis
+                |--------------------------------------------------------------------------
+                */
+
+                $parameterAnalysis[] = [
                     'parameter' => $parameter,
                     'latest' => $latest,
-                    'degradation' => round($degradation, 2),
-                    'performance' => round($performance, 2),
-                    'status' => $parameterStatus,
-                    'trend' => $parameterTrend,
-                    'chart' => $chart,
-                ]);
+                    'reference' => $reference,
+                    'degradation' => $degradation,
+                    'performance' => $performance,
+                    'trend' => $trend,
+                    'status' => $status,
+                    'interpretation' => $interpretation,
+                    'is_performance_parameter' => $isPerformanceParameter,
+                    'chart_data' => $chartData,
+                    'history' => $measurements,
+                ];
             }
         }
 
 
         /*
         |--------------------------------------------------------------------------
-        | Return Degradation View
+        | Return View
         |--------------------------------------------------------------------------
         */
 
         return view('degradation.index', [
+
             'components' => $components,
+
             'componentSummaries' => $componentSummaries,
+
+            'comparisonData' => $comparisonData,
+
             'selectedComponent' => $selectedComponent,
-            'selectedAnalysis' => $selectedAnalysis,
+
+            'parameterAnalysis' => $parameterAnalysis,
+
             'performanceParameters' => $performanceParameters,
+
+            'normalCount' => $normalCount,
+
+            'monitorCount' => $monitorCount,
+
+            'attentionCount' => $attentionCount,
+
+            'criticalCount' => $criticalCount,
         ]);
     }
 }

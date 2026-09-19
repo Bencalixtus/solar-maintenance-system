@@ -278,9 +278,7 @@
                         </small>
 
                         <div class="fw-semibold">
-
                             {{ $selectedComponent->componentType->name ?? 'N/A' }}
-
                         </div>
 
                     </div>
@@ -293,9 +291,7 @@
                         </small>
 
                         <div class="fw-semibold">
-
                             {{ $selectedComponent->installation->name ?? 'N/A' }}
-
                         </div>
 
                     </div>
@@ -308,9 +304,7 @@
                         </small>
 
                         <div class="fw-semibold">
-
                             {{ $selectedComponent->manufacturer ?? 'N/A' }}
-
                         </div>
 
                     </div>
@@ -620,7 +614,9 @@
             $performanceAnalyses = collect($parameterAnalysis)
                 ->where('is_performance_parameter', true)
                 ->filter(function ($analysis) {
+
                     return count($analysis['chart_data']) >= 2;
+
                 });
 
         @endphp
@@ -683,21 +679,27 @@
                                         @if($analysis['trend'] === 'Declining')
 
                                             <span class="badge bg-danger">
+
                                                 <i class="bi bi-arrow-down me-1"></i>
                                                 Declining
+
                                             </span>
 
                                         @elseif($analysis['trend'] === 'Improving')
 
                                             <span class="badge bg-success">
+
                                                 <i class="bi bi-arrow-up me-1"></i>
                                                 Improving
+
                                             </span>
 
                                         @else
 
                                             <span class="badge bg-secondary">
+
                                                 {{ $analysis['trend'] }}
+
                                             </span>
 
                                         @endif
@@ -780,33 +782,23 @@
                                     <tr>
 
                                         <td>
-
                                             {{ $measurement->measurement_date?->format('d M Y') }}
-
                                         </td>
 
                                         <td>
-
                                             {{ $measurement->value }}
-
                                         </td>
 
                                         <td>
-
                                             {{ $measurement->unit }}
-
                                         </td>
 
                                         <td>
-
                                             {{ $measurement->reference_value ?? '—' }}
-
                                         </td>
 
                                         <td>
-
                                             {{ $measurement->remarks ?? '—' }}
-
                                         </td>
 
                                     </tr>
@@ -925,7 +917,6 @@
                                         'Critical' => 'danger',
 
                                         default => 'secondary'
-
                                     };
 
                                 @endphp
@@ -1001,10 +992,8 @@
                 <div class="mt-2">
 
                     <code>
-
                         ((Reference Value − Current Value)
                         ÷ Reference Value) × 100
-
                     </code>
 
                 </div>
@@ -1105,7 +1094,6 @@
 
 {{-- CHART.JS --}}
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
 
 <script>
 
@@ -1424,7 +1412,9 @@ document.addEventListener('DOMContentLoaded', function () {
 }
 
 .status-card {
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    transition:
+        transform 0.2s ease,
+        box-shadow 0.2s ease;
 }
 
 .status-card:hover {
