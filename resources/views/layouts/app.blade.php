@@ -902,14 +902,10 @@
 
 <!-- Replacement Forecast -->
 <li class="nav-item">
-    <a href="#"
-       class="nav-link disabled"
-       style="cursor: not-allowed; opacity: 0.6;">
+    <a href="{{ route('replacement-forecasts.index') }}"
+       class="nav-link {{ request()->routeIs('replacement-forecasts.*') ? 'active' : '' }}">
         <i class="nav-icon bi bi-graph-up-arrow"></i>
-        <p>
-            Replacement Forecast
-            <span class="right badge bg-secondary">Soon</span>
-        </p>
+        <p>Replacement Forecast</p>
     </a>
 </li>
 

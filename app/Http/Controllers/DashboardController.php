@@ -7,10 +7,9 @@ use App\Models\Component;
 use App\Models\Inspection;
 use App\Models\MaintenanceSchedule;
 use App\Models\ReplacementForecast;
-use App\Models\Measurement;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
-
 class DashboardController extends Controller
 {
     /**
@@ -18,18 +17,77 @@ class DashboardController extends Controller
      */
     public function index()
     {
-        $installationCount = Installation::count();
-        $componentCount = Component::count();
-        $inspectionCount = Inspection::count();
+        /*
+        |--------------------------------------------------------------------------
+        | Basic Statistics
+        |--------------------------------------------------------------------------
+        */
+
+        $totalInstallations = Installation::count();
+
+        $totalComponents = Component::count();
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Pending Inspections
+        |--------------------------------------------------------------------------
+        |
+        | An inspection is considered pending when its next inspection
+        | date is today or earlier.
+        |
+        */
+
+        $pendingInspections = Inspection::whereNotNull('next_inspection_date')
+            ->whereDate('next_inspection_date', '<=', Carbon::today())
+            ->count();
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Maintenance Statistics
+        |--------------------------------------------------------------------------
+        */
+
+        $totalMaintenance = MaintenanceSchedule::count();
+
+        $scheduledMaintenance = MaintenanceSchedule::where(
+            'status',
+            'Scheduled'
+        )->count();
+
+        $dueMaintenance = MaintenanceSchedule::whereIn(
+            'status',
+            ['Due Soon', 'Overdue']
+        )->count();
+
+        $maintenanceDue = $dueMaintenance;
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Upcoming Maintenance
+        |--------------------------------------------------------------------------
+        |
+        | The maintenance_schedules table uses next_due_date.
+        |
+        */
 
         $upcomingMaintenance = MaintenanceSchedule::whereDate(
-            'scheduled_date',
+            'next_due_date',
             '>=',
             Carbon::today()
         )
-            ->orderBy('scheduled_date')
+            ->orderBy('next_due_date')
             ->take(5)
             ->get();
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Recent Inspections
+        |--------------------------------------------------------------------------
+        */
 
         $recentInspections = Inspection::with([
             'installation',
@@ -39,30 +97,174 @@ class DashboardController extends Controller
             ->take(5)
             ->get();
 
-        $activeComponents = Component::where('status', 'Active')->count();
 
-        $replacementForecasts = ReplacementForecast::count();
+        /*
+        |--------------------------------------------------------------------------
+        | Component Condition Data
+        |--------------------------------------------------------------------------
+        */
 
-        $highRiskForecasts = ReplacementForecast::where(
-            'risk_level',
-            'High'
-        )->count();
+        /*
+|--------------------------------------------------------------------------
+| Component Condition Data
+|--------------------------------------------------------------------------
+|
+| Component condition is recorded during inspections.
+| Therefore, the dashboard uses the latest inspection condition
+| recorded for each component.
+|
+*/
+
+$conditionData = [
+    'Excellent' => 0,
+    'Good' => 0,
+    'Fair' => 0,
+    'Poor' => 0,
+    'Critical' => 0,
+];
+
+/*
+|--------------------------------------------------------------------------
+| Get Latest Inspection Condition for Each Component
+|--------------------------------------------------------------------------
+*/
+
+$latestComponentConditions = DB::table('inspection_items')
+    ->join(
+        'inspections',
+        'inspection_items.inspection_id',
+        '=',
+        'inspections.id'
+    )
+    ->select(
+        'inspection_items.component_id',
+        'inspection_items.condition',
+        'inspections.inspection_date',
+        'inspection_items.id'
+    )
+    ->whereNotNull('inspection_items.component_id')
+    ->whereNotNull('inspection_items.condition')
+    ->orderByDesc('inspections.inspection_date')
+    ->orderByDesc('inspection_items.id')
+    ->get();
+
+/*
+|--------------------------------------------------------------------------
+| Count Only the Latest Condition Per Component
+|--------------------------------------------------------------------------
+*/
+
+$processedComponents = [];
+
+foreach ($latestComponentConditions as $item) {
+
+    $componentId = $item->component_id;
+
+    /*
+    | Skip this component if its latest condition
+    | has already been processed.
+    */
+
+    if (isset($processedComponents[$componentId])) {
+        continue;
+    }
+
+    $processedComponents[$componentId] = true;
+
+    $condition = trim((string) $item->condition);
+
+    /*
+    |--------------------------------------------------------------------------
+    | Normalize Condition Value
+    |--------------------------------------------------------------------------
+    */
+
+    $normalizedCondition = strtolower($condition);
+
+    switch ($normalizedCondition) {
+
+        case 'excellent':
+            $conditionData['Excellent']++;
+            break;
+
+        case 'good':
+            $conditionData['Good']++;
+            break;
+
+        case 'fair':
+            $conditionData['Fair']++;
+            break;
+
+        case 'poor':
+            $conditionData['Poor']++;
+            break;
+
+        case 'critical':
+            $conditionData['Critical']++;
+            break;
+    }
+}
+
+        /*
+        |--------------------------------------------------------------------------
+        | Replacement Risk Data
+        |--------------------------------------------------------------------------
+        */
+
+        $riskData = [
+            'Low' => 0,
+            'Medium' => 0,
+            'High' => 0,
+        ];
+
+        $replacementForecastsCollection = ReplacementForecast::get();
+
+        foreach ($replacementForecastsCollection as $forecast) {
+
+            $riskLevel = $forecast->risk_level;
+
+            if (isset($riskData[$riskLevel])) {
+                $riskData[$riskLevel]++;
+            }
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Dashboard View
+        |--------------------------------------------------------------------------
+        */
 
         return view('dashboard', [
-            'installationCount' => $installationCount,
-            'componentCount' => $componentCount,
-            'inspectionCount' => $inspectionCount,
-            'activeComponents' => $activeComponents,
+
+            'totalInstallations' => $totalInstallations,
+
+            'totalComponents' => $totalComponents,
+
+            'pendingInspections' => $pendingInspections,
+
+            'maintenanceDue' => $maintenanceDue,
+
+            'totalMaintenance' => $totalMaintenance,
+
+            'scheduledMaintenance' => $scheduledMaintenance,
+
+            'dueMaintenance' => $dueMaintenance,
+
             'upcomingMaintenance' => $upcomingMaintenance,
+
             'recentInspections' => $recentInspections,
-            'replacementForecasts' => $replacementForecasts,
-            'highRiskForecasts' => $highRiskForecasts,
+
+            'conditionData' => $conditionData,
+
+            'riskData' => $riskData,
+
         ]);
     }
 
 
     /**
-     * Degradation analysis dashboard
+     * Degradation Analysis Dashboard
      */
     public function degradation(Request $request)
     {
@@ -70,10 +272,6 @@ class DashboardController extends Controller
         |--------------------------------------------------------------------------
         | Performance Parameters
         |--------------------------------------------------------------------------
-        |
-        | These parameters are suitable for calculating performance loss when
-        | a meaningful reference value is available.
-        |
         */
 
         $performanceParameters = [
@@ -124,6 +322,7 @@ class DashboardController extends Controller
 
         $componentSummaries = [];
 
+
         /*
         |--------------------------------------------------------------------------
         | Component Comparison Chart
@@ -143,19 +342,12 @@ class DashboardController extends Controller
 
             $performanceLosses = [];
 
-            /*
-             * Group measurements by parameter.
-             */
             $measurementsByParameter = $component->measurements
                 ->groupBy('parameter');
 
 
             foreach ($measurementsByParameter as $parameter => $measurements) {
 
-                /*
-                 * Only performance parameters are used for degradation
-                 * calculations.
-                 */
                 if (!in_array($parameter, $performanceParameters)) {
                     continue;
                 }
@@ -170,9 +362,13 @@ class DashboardController extends Controller
                     continue;
                 }
 
+
                 /*
-                 * Use the latest meaningful reference value.
-                 */
+                |--------------------------------------------------------------------------
+                | Find Reference Value
+                |--------------------------------------------------------------------------
+                */
+
                 $reference = null;
 
                 foreach ($measurements->reverse() as $measurement) {
@@ -187,10 +383,7 @@ class DashboardController extends Controller
                     }
                 }
 
-                /*
-                 * If there is no reference value, degradation cannot
-                 * be calculated reliably.
-                 */
+
                 if (
                     $reference === null ||
                     $latest->value === null ||
@@ -206,10 +399,6 @@ class DashboardController extends Controller
                     / $reference
                 ) * 100;
 
-                /*
-                 * Prevent negative degradation from being displayed as
-                 * performance loss.
-                 */
                 $degradation = max(0, $degradation);
 
                 $performanceLosses[] = $degradation;
@@ -218,14 +407,16 @@ class DashboardController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | Component Average Degradation
+            | Average Degradation
             |--------------------------------------------------------------------------
             */
 
             $averageDegradation = null;
 
             if (count($performanceLosses) > 0) {
-                $averageDegradation = array_sum($performanceLosses)
+
+                $averageDegradation =
+                    array_sum($performanceLosses)
                     / count($performanceLosses);
             }
 
@@ -322,6 +513,7 @@ class DashboardController extends Controller
         */
 
         $selectedComponent = null;
+
         $parameterAnalysis = [];
 
 
@@ -346,10 +538,6 @@ class DashboardController extends Controller
                 ->groupBy('parameter');
 
 
-            /*
-             * Include every parameter found in the component's
-             * measurements.
-             */
             foreach ($measurementsByParameter as $parameter => $measurements) {
 
                 $measurements = $measurements
@@ -361,7 +549,7 @@ class DashboardController extends Controller
 
                 /*
                 |--------------------------------------------------------------------------
-                | Is Performance Parameter?
+                | Performance Parameter
                 |--------------------------------------------------------------------------
                 */
 
@@ -373,7 +561,7 @@ class DashboardController extends Controller
 
                 /*
                 |--------------------------------------------------------------------------
-                | Find Reference Value
+                | Reference Value
                 |--------------------------------------------------------------------------
                 */
 
@@ -394,13 +582,16 @@ class DashboardController extends Controller
 
                 /*
                 |--------------------------------------------------------------------------
-                | Default Analysis Values
+                | Default Values
                 |--------------------------------------------------------------------------
                 */
 
                 $degradation = null;
+
                 $performance = null;
+
                 $trend = 'Insufficient Data';
+
                 $status = 'Monitoring Only';
 
                 $chartData = [];
@@ -408,7 +599,7 @@ class DashboardController extends Controller
 
                 /*
                 |--------------------------------------------------------------------------
-                | Performance Parameter Analysis
+                | Performance Analysis
                 |--------------------------------------------------------------------------
                 */
 
@@ -429,6 +620,7 @@ class DashboardController extends Controller
                         ) * 100;
 
                         $degradation = max(0, $degradation);
+
 
                         $performance = max(
                             0,
@@ -462,11 +654,8 @@ class DashboardController extends Controller
 
                         /*
                         |--------------------------------------------------------------------------
-                        | Trend
+                        | Degradation History
                         |--------------------------------------------------------------------------
-                        |
-                        | Compare the first and latest degradation values.
-                        |
                         */
 
                         $degradationHistory = [];
@@ -505,10 +694,17 @@ class DashboardController extends Controller
                                 'date' => $measurement->measurement_date
                                     ? $measurement->measurement_date->format('d M Y')
                                     : 'N/A',
+
                                 'degradation' => $measurementDegradation,
                             ];
                         }
 
+
+                        /*
+                        |--------------------------------------------------------------------------
+                        | Trend
+                        |--------------------------------------------------------------------------
+                        */
 
                         if (count($degradationHistory) >= 2) {
 
@@ -565,10 +761,13 @@ class DashboardController extends Controller
                                 'date' => $measurement->measurement_date
                                     ? $measurement->measurement_date->format('d M Y')
                                     : 'N/A',
+
                                 'value' => (float) $measurement->value,
+
                                 'reference' => $measurementReference,
                             ];
                         }
+
                     } else {
 
                         $status = 'No Reference';
@@ -651,7 +850,7 @@ class DashboardController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | Return View
+        | Degradation View
         |--------------------------------------------------------------------------
         */
 
@@ -676,6 +875,7 @@ class DashboardController extends Controller
             'attentionCount' => $attentionCount,
 
             'criticalCount' => $criticalCount,
+
         ]);
     }
 }
