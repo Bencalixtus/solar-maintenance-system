@@ -911,17 +911,12 @@
 
 <!-- Reports -->
 <li class="nav-item">
-    <a href="#"
-       class="nav-link disabled"
-       style="cursor: not-allowed; opacity: 0.6;">
+    <a href="{{ route('reports.index') }}"
+       class="nav-link {{ request()->routeIs('reports.*') ? 'active' : '' }}">
         <i class="nav-icon bi bi-file-earmark-bar-graph"></i>
-        <p>
-            Reports
-            <span class="right badge bg-secondary">Soon</span>
-        </p>
+        <p>Reports</p>
     </a>
 </li>
-
                     {{-- ================================================= --}}
                     {{-- SYSTEM --}}
                     {{-- ================================================= --}}

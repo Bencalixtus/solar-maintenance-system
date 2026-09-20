@@ -11,6 +11,7 @@ use App\Http\Controllers\MaintenanceScheduleController;
 use App\Http\Controllers\MaintenanceRecordController;
 use App\Http\Controllers\CostRecordController;
 use App\Http\Controllers\ReplacementForecastController;
+use App\Http\Controllers\ReportController;
 
 
 /*
@@ -189,6 +190,8 @@ Route::middleware(['auth'])->group(function () {
         '/replacement-forecasts/{replacementForecast}',
         [ReplacementForecastController::class, 'destroy']
     )->name('replacement-forecasts.destroy');
+    Route::get('/reports', [ReportController::class, 'index'])
+    ->name('reports.index');
 
 
     /*
