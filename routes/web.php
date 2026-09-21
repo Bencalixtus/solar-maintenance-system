@@ -190,8 +190,12 @@ Route::middleware(['auth'])->group(function () {
         '/replacement-forecasts/{replacementForecast}',
         [ReplacementForecastController::class, 'destroy']
     )->name('replacement-forecasts.destroy');
+    
     Route::get('/reports', [ReportController::class, 'index'])
     ->name('reports.index');
+
+    Route::get('/reports/print', [ReportController::class, 'print'])
+    ->name('reports.print');
 
 
     /*

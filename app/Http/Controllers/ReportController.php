@@ -11,22 +11,43 @@ use App\Models\CostRecord;
 use App\Models\ReplacementForecast;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Carbon\Carbon;
 
 class ReportController extends Controller
 {
     /**
-     * Reports dashboard.
+     * Display the reports dashboard.
      */
     public function index(Request $request)
     {
+        return view('reports.index', $this->getReportData($request));
+    }
+
+    /**
+     * Display the print-friendly report.
+     */
+    public function print(Request $request)
+    {
+        return view('reports.print', $this->getReportData($request));
+    }
+
+    /**
+     * Prepare all report data.
+     */
+    private function getReportData(Request $request)
+    {
         $installationId = $request->input('installation_id');
+
+        /*
+        |--------------------------------------------------------------------------
+        | Installations
+        |--------------------------------------------------------------------------
+        */
 
         $installations = Installation::orderBy('name')->get();
 
         /*
         |--------------------------------------------------------------------------
-        | Installation filter
+        | Components
         |--------------------------------------------------------------------------
         */
 
@@ -45,7 +66,7 @@ class ReportController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | Inspection Summary
+        | Inspections
         |--------------------------------------------------------------------------
         */
 
@@ -111,6 +132,7 @@ class ReportController extends Controller
                 $condition = strtolower(trim((string) $item->condition));
 
                 switch ($condition) {
+
                     case 'excellent':
                         $conditionData['Excellent']++;
                         break;
@@ -136,15 +158,21 @@ class ReportController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | Maintenance Summary
+        | Maintenance Schedules
         |--------------------------------------------------------------------------
         */
 
         $maintenanceQuery = MaintenanceSchedule::query();
 
         if ($componentIds->isNotEmpty()) {
-            $maintenanceQuery->whereIn('component_id', $componentIds);
+
+            $maintenanceQuery->whereIn(
+                'component_id',
+                $componentIds
+            );
+
         } elseif ($installationId) {
+
             $maintenanceQuery->whereRaw('1 = 0');
         }
 
@@ -175,8 +203,14 @@ class ReportController extends Controller
         $maintenanceRecordsQuery = MaintenanceRecord::query();
 
         if ($componentIds->isNotEmpty()) {
-            $maintenanceRecordsQuery->whereIn('component_id', $componentIds);
+
+            $maintenanceRecordsQuery->whereIn(
+                'component_id',
+                $componentIds
+            );
+
         } elseif ($installationId) {
+
             $maintenanceRecordsQuery->whereRaw('1 = 0');
         }
 
@@ -184,15 +218,21 @@ class ReportController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | Cost Summary
+        | Cost Analysis
         |--------------------------------------------------------------------------
         */
 
         $costQuery = CostRecord::query();
 
         if ($componentIds->isNotEmpty()) {
-            $costQuery->whereIn('component_id', $componentIds);
+
+            $costQuery->whereIn(
+                'component_id',
+                $componentIds
+            );
+
         } elseif ($installationId) {
+
             $costQuery->whereRaw('1 = 0');
         }
 
@@ -224,22 +264,36 @@ class ReportController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | Replacement Risk
+        | Replacement Forecast
         |--------------------------------------------------------------------------
         */
 
         $forecastQuery = ReplacementForecast::query();
 
         if ($componentIds->isNotEmpty()) {
-            $forecastQuery->whereIn('component_id', $componentIds);
+
+            $forecastQuery->whereIn(
+                'component_id',
+                $componentIds
+            );
+
         } elseif ($installationId) {
+
             $forecastQuery->whereRaw('1 = 0');
         }
 
         $riskData = [
-            'Low' => (clone $forecastQuery)->where('risk_level', 'Low')->count(),
-            'Medium' => (clone $forecastQuery)->where('risk_level', 'Medium')->count(),
-            'High' => (clone $forecastQuery)->where('risk_level', 'High')->count(),
+            'Low' => (clone $forecastQuery)
+                ->where('risk_level', 'Low')
+                ->count(),
+
+            'Medium' => (clone $forecastQuery)
+                ->where('risk_level', 'Medium')
+                ->count(),
+
+            'High' => (clone $forecastQuery)
+                ->where('risk_level', 'High')
+                ->count(),
         ];
 
         $replacementForecasts = $forecastQuery
@@ -249,11 +303,12 @@ class ReportController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | Report Statistics
+        | Statistics
         |--------------------------------------------------------------------------
         */
 
         $statistics = [
+
             'total_installations' => $installationId
                 ? Installation::where('id', $installationId)->count()
                 : Installation::count(),
@@ -271,31 +326,55 @@ class ReportController extends Controller
             'high_risk' => $riskData['High'],
 
             'critical_components' => $conditionData['Critical'],
+
         ];
 
-        return view('reports.index', compact(
+        return compact(
+
             'installations',
+
             'installationId',
+
             'components',
+
             'totalInspections',
+
             'recentInspections',
+
             'conditionData',
+
             'totalMaintenance',
+
             'scheduledMaintenance',
+
             'dueMaintenance',
+
             'overdueMaintenance',
+
             'completedMaintenance',
+
             'totalMaintenanceRecords',
+
             'totalCost',
+
             'maintenanceCost',
+
             'repairCost',
+
             'replacementCost',
+
             'partsCost',
+
             'labourCost',
+
             'otherCost',
+
             'riskData',
+
             'replacementForecasts',
+
             'statistics'
-        ));
+
+        );
     }
 }

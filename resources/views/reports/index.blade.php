@@ -244,10 +244,14 @@
             </div>
 
             <div class="report-actions no-print">
-                <button onclick="window.print()" class="btn btn-warning">
-                    <i class="bi bi-printer me-1"></i>
-                    Print Report
-                </button>
+                <a
+    href="{{ route('reports.print', request()->query()) }}"
+    target="_blank"
+    class="btn btn-warning"
+>
+    <i class="bi bi-printer me-1"></i>
+    Print Report
+</a>
             </div>
 
         </div>
