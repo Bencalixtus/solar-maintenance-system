@@ -927,32 +927,15 @@
 
 
                     {{-- User Management --}}
-                    <li class="nav-item">
-
-                        <a href="#"
-                           class="nav-link">
-
-                            <i class="nav-icon bi bi-people"></i>
-
-                            <p>
-
-                                User Management
-
-                                <span class="badge
-                                             bg-warning
-                                             text-dark
-                                             ms-auto">
-
-                                    Soon
-
-                                </span>
-
-                            </p>
-
-                        </a>
-
-                    </li>
-
+                   @if(auth()->user()->role === 'Admin')
+    <li class="nav-item">
+        <a href="{{ route('users.index') }}"
+           class="nav-link {{ request()->routeIs('users.*') ? 'active' : '' }}">
+            <i class="nav-icon bi bi-people"></i>
+            <p>User Management</p>
+        </a>
+    </li>
+@endif
 
                     {{-- Profile --}}
                     <li class="nav-item">

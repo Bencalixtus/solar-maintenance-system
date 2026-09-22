@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
+
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\InstallationController;
 use App\Http\Controllers\ComponentTypeController;
@@ -12,6 +13,7 @@ use App\Http\Controllers\MaintenanceRecordController;
 use App\Http\Controllers\CostRecordController;
 use App\Http\Controllers\ReplacementForecastController;
 use App\Http\Controllers\ReportController;
+use App\Http\Controllers\UserController;
 
 
 /*
@@ -48,12 +50,64 @@ Route::middleware(['auth'])->group(function () {
     |--------------------------------------------------------------------------
     | Installation Management
     |--------------------------------------------------------------------------
+    | Admin:
+    |   Full access
+    |
+    | Technician:
+    |   View only
+    |
+    | Supervisor:
+    |   View only
+    |--------------------------------------------------------------------------
     */
 
-    Route::resource(
-        'installations',
-        InstallationController::class
-    );
+    // View installations
+    Route::middleware('role:Admin,Technician,Supervisor')->group(function () {
+
+        Route::get(
+            '/installations',
+            [InstallationController::class, 'index']
+        )->name('installations.index');
+
+        Route::get(
+            '/installations/{installation}',
+            [InstallationController::class, 'show']
+        )->name('installations.show');
+    });
+
+    // Admin-only installation management
+    Route::middleware('role:Admin')->group(function () {
+
+        Route::get(
+            '/installations/create',
+            [InstallationController::class, 'create']
+        )->name('installations.create');
+
+        Route::post(
+            '/installations',
+            [InstallationController::class, 'store']
+        )->name('installations.store');
+
+        Route::get(
+            '/installations/{installation}/edit',
+            [InstallationController::class, 'edit']
+        )->name('installations.edit');
+
+        Route::put(
+            '/installations/{installation}',
+            [InstallationController::class, 'update']
+        )->name('installations.update');
+
+        Route::patch(
+            '/installations/{installation}',
+            [InstallationController::class, 'update']
+        );
+
+        Route::delete(
+            '/installations/{installation}',
+            [InstallationController::class, 'destroy']
+        )->name('installations.destroy');
+    });
 
 
     /*
@@ -91,9 +145,13 @@ Route::middleware(['auth'])->group(function () {
         InspectionController::class
     );
 
+
     /*
-     * Print Inspection Report
-     */
+    |--------------------------------------------------------------------------
+    | Print Inspection Report
+    |--------------------------------------------------------------------------
+    */
+
     Route::get(
         '/inspections/{inspection}/print',
         [InspectionController::class, 'print']
@@ -190,12 +248,41 @@ Route::middleware(['auth'])->group(function () {
         '/replacement-forecasts/{replacementForecast}',
         [ReplacementForecastController::class, 'destroy']
     )->name('replacement-forecasts.destroy');
-    
-    Route::get('/reports', [ReportController::class, 'index'])
-    ->name('reports.index');
 
-    Route::get('/reports/print', [ReportController::class, 'print'])
-    ->name('reports.print');
+
+    /*
+    |--------------------------------------------------------------------------
+    | Reports
+    |--------------------------------------------------------------------------
+    */
+
+    Route::get(
+        '/reports',
+        [ReportController::class, 'index']
+    )->name('reports.index');
+
+    Route::get(
+        '/reports/print',
+        [ReportController::class, 'print']
+    )->name('reports.print');
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | User Management
+    |--------------------------------------------------------------------------
+    | ADMIN ONLY
+    |--------------------------------------------------------------------------
+    */
+
+    Route::middleware('role:Admin')->group(function () {
+
+        Route::resource(
+            'users',
+            UserController::class
+        );
+
+    });
 
 
     /*
